@@ -1,0 +1,187 @@
+---
+title: "Lab 08: Bagging and Random Forests"
+subtitle: "PSTAT 131/231, Spring 2021"
+header-includes: \usepackage{mathtools}
+output: pdf_document
+urlcolor: blue
+---
+
+### Learning Objectives
+> - Bagged trees and random forest by randomForest()
+> - Variable importance by importance() and varImpPlot()
+> - Boosting by gbm()
+
+------
+In Lab 04 - Decision Trees, we used classification trees to analyze the Carseats data set. In this data, Sales is a continuous variable, and so we begin by recoding it as a binary variable. We use the `ifelse()` function to create a variable, called _High_, which takes on a value of _Yes_ if the Sales variable exceeds the median of Sales, and takes a value _No_ otherwise.
+
+```{r, message=F}
+library(dplyr)
+#install.packages("randomForest")
+library(randomForest)
+#install.packages("gbm")
+library(gbm)
+library(ISLR)
+library(tree)
+```
+
+Let's have a glance at the data.
+```{r}
+attach(Carseats)
+Carseats = Carseats %>% 
+    mutate(High=as.factor(ifelse(Sales <= median(Sales), "No", "Yes"))) %>%
+    select(-Sales)
+
+# Check the structure of above data frame we just created
+glimpse(Carseats)
+```
+
+## 1. Review of a single tree model
+
+As usual, we split the data into training and test set.
+```{r}
+# Sample 250 observations as training data
+set.seed(3)
+train = sample(1:nrow(Carseats), 250)
+train.carseats = Carseats[train,]
+
+# The rest as test data
+test.carseats = Carseats[-train,]
+```
+
+As a review, we use 10-fold CV to select the best tree size and prune the original large tree to this target number. We calculate the test error rate for future comparison.
+
+```{r}
+tree.carseats = tree(High~., data = Carseats, subset = train) 
+summary(tree.carseats)
+
+# 10-fold CV for selecting best tree size
+tree.cv = cv.tree(tree.carseats, FUN=prune.misclass, K=10)
+
+# Best size 
+best.cv = min(tree.cv$size[tree.cv$dev==min(tree.cv$dev)])
+best.cv
+
+# Prune the tree to the optimal size
+tree.prune = prune.misclass(tree.carseats, best=best.cv)
+
+# Test error for tree.prune
+tree.err = table(treePred=predict(tree.prune, newdata=test.carseats, type="class"), 
+                 truth=test.carseats$High)
+test.tree.err = 1 - sum(diag(tree.err))/sum(tree.err)
+test.tree.err
+```
+
+## 2. Bagging 
+
+The test error rate for the best-size pruned tree is `r round(test.tree.err,4)`. In the following, we apply bagging and random forests to the Carseats data, using the randomForest package in R and compare the same metric for bagged tree and random forest. Note that the exact results obtained in this section may depend on the version of R and the version of the randomForest package installed on your computer. Recall that bagging is simply a special case of a random forest with m = p. Therefore, the randomForest() function can be used to perform both random forests and bagging. We perform bagging as follows:
+
+```{r}
+bag.carseats = randomForest(High ~ ., data=train.carseats, mtry=10, importance=TRUE)
+bag.carseats
+
+# equivalently, you can do 
+# bag.carseats = randomForest(High ~ ., data=Carseats, subset=train, mtry=4, importance=TRUE)
+```
+
+The argument `mtry=10` indicates that 10 predictors should be considered for each split of the tree -in other words, that bagging should be done. The argument `importance=TRUE` tells whether independent variable importance in bagged trees should be assessed. 
+
+```{r, fig.height=3.5, fig.width=7, fig.align='center'}
+plot(bag.carseats)
+legend("top", colnames(bag.carseats$err.rate),col=1:4,cex=0.8,fill=1:4)
+```
+
+How well does this bagged model perform on the test set?
+
+```{r}
+yhat.bag = predict(bag.carseats, newdata = test.carseats)
+
+# Confusion matrix
+bag.err = table(pred = yhat.bag, truth = test.carseats$High)
+test.bag.err = 1 - sum(diag(bag.err))/sum(bag.err)
+test.bag.err
+```
+
+The test set error rate associated with the bagged classification tree is `r round(test.bag.err,4)`, 4.67% lower than that obtained using an optimally-pruned single tree (`r round(test.tree.err,4)`). You may consider this a minor improvement, however there are many cases that the improvement could be as half. We could change the number of trees grown by randomForest() using the `ntree` argument. For simplicity of output, we set the following code chunk option as `eval=FALSE`.
+
+```{r, eval=F}
+bag.carseats = randomForest(High ~ ., data=train.carseats, mtry=10, ntree=700,importance=TRUE)
+yhat.bag = predict (bag.carseats, newdata = test.carseats)
+
+# Confusion matrix
+bag.err = table(pred = yhat.bag, truth = test.carseats$High)
+test.bag.err = 1 - sum(diag(bag.err))/sum(bag.err)
+test.bag.err
+```
+
+## 3. Random Forests
+
+Growing a random forest proceeds in exactly the same way, except that we use a smaller value of the `mtry` argument. By default, randomForest() uses p/3 variables when building a random forest of regression trees, and $\sqrt p$ variables when building a random forest of classification trees. Here we use `mtry = 3`.
+
+```{r, fig.height=3.5, fig.width=7, fig.align='center'}
+rf.carseats = randomForest(High ~ ., data=train.carseats, mtry=3, ntree=500, importance=TRUE)
+rf.carseats
+plot(rf.carseats)
+
+yhat.rf = predict (rf.carseats, newdata = test.carseats)
+
+# Confusion matrix
+rf.err = table(pred = yhat.rf, truth = test.carseats$High)
+test.rf.err = 1 - sum(diag(rf.err))/sum(rf.err)
+test.rf.err
+```
+
+The test set error rate is `r round(test.rf.err, 4)`; this indicates that random forests yielded an improvement over bagging in this case.
+
+Using the importance() function, we can view the importance of each importance() variable.
+
+```{r}
+importance(rf.carseats)
+```
+
+Variable importance plot is also a useful tool and can be plotted using varImpPlot() function. By default, top 10 variables are selected and plotted based on Model Accuracy and Gini value. We can also get a plot with decreasing order of importance based on Model Accuracy and Gini value.
+
+```{r}
+varImpPlot(rf.carseats)
+
+varImpPlot(rf.carseats, sort=T, main="Variable Importance for rf.carseats", n.var=5)
+```
+
+The results indicate that across all of the trees considered in the random forest, the price is by far the most important variable in terms of Model Accuracy and Gini index.
+
+## 4. Boosting
+
+Here we use the gbm package, and within it the `gbm()` function, to fit boosted classification trees to the Carseats data set. To use gbm(), we have to guarantee that the response variable is coded as $\{0, 1\}$ instead of two levels. We run `gbm()` with the option `distribution="bernoulli"` since this is a binary classification problem; if it were a regression problem, we would use `distribution="gaussian"`. The argument `n.trees=500` indicates that we want 500 trees, and the option `interaction.depth=4` limits the depth of each tree. The argument `shrinkage` is the learning rate or step-size reduction in every step of the boosting. Its default value is 0.001.
+
+```{r}
+set.seed(1)
+boost.carseats = gbm(ifelse(High=="Yes",1,0)~., data=train.carseats, 
+                     distribution="bernoulli", n.trees=500, interaction.depth=4)
+```
+
+The `summary()` function produces a relative influence plot and also outputs the relative influence statistics.
+
+```{r}
+summary(boost.carseats)
+```
+
+We see that Price and ShelveLoc are by far the most important variables. We can also produce partial dependence plots for these variables. These plots illustrate the marginal effect of the selected variables on the response after integrating out the other variables. 
+
+```{r, fig.width=7, fit.height=3, fig.align='center'}
+par(mfrow =c(1,2))
+plot(boost.carseats ,i="Price")
+plot(boost.carseats ,i="ShelveLoc")
+```
+
+We now use the boosted model to predict `High` on the test set:
+
+```{r}
+yhat.boost = predict(boost.carseats, newdata = test.carseats, n.trees=500)
+
+# Confusion matrix
+boost.err = table(pred = yhat.rf, truth = test.carseats$High)
+test.boost.err = 1 - sum(diag(boost.err))/sum(boost.err)
+test.boost.err
+```
+
+The test error rate obtained is `r round(test.boost.err, 4)`; similar to the test error rate for random forests
+and superior to that for bagging. 
