@@ -1,0 +1,201 @@
+---
+title: "131 HW4"
+author: "Lucas Wang and Yubo Wei "
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#load library
+library(tidyverse)
+library(tree)
+library(randomForest)
+library(gbm)
+library(ROCR)
+library(e1071)
+library(imager)
+
+```
+1(a)Given a sample of size n, what is the probability that any observation j is not in in a bootstrap sample? Express
+your answer as a function of n.
+The probability is $(\frac{n-1}{n})^n$.
+1(b)For n=1000, the probability is 0.3676954.
+```{r}
+(999/1000)^1000
+```
+1(c)Verify that your calculation is reasonable by resampling the numbers 1 to 1000 with replace and printing the
+number of missing observations.
+370 observations are missing, which is close to the expected number of missing observations, 368.
+```{r}
+set.seed(1)
+num <- 1:1000
+num_sample <- sample(num,replace = TRUE)
+num_unique <- length(unique(num_sample))
+1000 - num_unique
+```
+1(d)Use bootstrap resampling on a sequence of 62 1’s (makes) and 64 0’s (misses). For each bootstrap sample compute and save the sample mean(e.g. bootstrap FG% for the player). Use 1000 bootstrap samples to plot a histogram of those values. Compute the 95% bootstrap confidence interval for Stephen Curry’s “true” end-of-season FG% using the quantile function in R. Print the endpoints of this interval.
+His mean is 43 percent, so his 49.2 percent is likely to drop in the end-of-season. Due to regression to mean, future percentage will be closer to mean which will be lower.
+```{r}
+shot_sample <- c(rep(1,62), rep(0,64))
+bootstrap_mean <- c()
+for (i in 1:1000){
+  bootstrap_sample <- sample(shot_sample, replace = TRUE)
+  bootstrap_mean <- c(bootstrap_mean, mean(bootstrap_sample))
+}
+hist(bootstrap_mean)
+left_point <- quantile(bootstrap_mean, 0.025)
+right_point <- quantile(bootstrap_mean, 0.975)
+cat('The confidence interval is (',left_point,',',right_point,')')
+
+```
+2.Eigenfaces
+(a)Find average face
+```{r}
+load("faces_array.RData")
+face_mat <- sapply(1:1000, function(i) as.numeric(faces_array[, , i])) %>% t
+plot_face <- function(image_vector) {
+plot(as.cimg(t(matrix(image_vector, ncol=100))), axes=FALSE, asp=1)
+}
+average_face <- apply(face_mat, 2, FUN = mean )
+plot_face(average_face)
+```
+
+(b) We need 5 principle components to explain at least 50% of the total variation in the face images.
+```{r}
+plot_face(average_face)
+pr.out <- prcomp(face_mat, center = TRUE, scale = FALSE)
+pr.var <- pr.out$sdev ^ 2
+pve <- pr.var / sum(pr.var)
+cumulative_pve <- cumsum(pve)
+## This will put the next two plots side by side
+par(mfrow=c(1, 2))
+## Plot proportion of variance explained
+plot(pve, type="l", lwd=3)
+plot(cumulative_pve, type="l", lwd=3)
+num_pc <- min(which(cumulative_pve >= 0.5))
+```
+(c)Plot the first 16 principle component directions as faces
+```{r}
+# figure margins too large.
+par(mfrow = c(2,4))
+for (i in 1:8){
+  plot_face(pr.out$rotation[ , i])
+}
+par(mfrow = c(2,4))
+for (i in 9:16){
+  plot_face(pr.out$rotation[ , i])
+}
+```
+2(d)The contrast of the background is captured by the first component.
+```{r}
+par(mfrow = c(2,5))
+for (i in 1:5){
+  plot_face(face_mat[order(pr.out$x[,1],decreasing = TRUE)[i], ])
+}
+for (j in 996:1000){
+  plot_face(face_mat[order(pr.out$x[,1],decreasing = TRUE)[j], ])
+}
+```
+2(e)The hair is captured by the principal component 5. For those faces with higher PC5 value, they usually have longer hair, while for those faces with lower PC5 value, they usually have short hair. Based on my results, PC5 is much more useful than PC1. The background contrast does not really matter because it cannot help us recognize someone's face. However, hair length is one of the important aspects of a human face, which is captured by PC5. Therefore, PC5 can help us recognize a face and is more important.
+```{r}
+par(mfrow = c(2,5))
+for (i in 1:5){
+  plot_face(face_mat[order(pr.out$x[,5],decreasing = TRUE)[i], ])
+}
+for (j in 996:1000){
+  plot_face(face_mat[order(pr.out$x[,5],decreasing = TRUE)[j], ])
+}
+```
+
+3(a)Use read_csv to load nonlinear.csv and plot the data. Plot each point colored according to its class, Y.
+```{r}
+nonlinear_data <- read_csv('nonlinear.csv')
+plot(nonlinear_data$X1 , nonlinear_data$X2 , col = 3 - nonlinear_data$Y)
+```
+
+
+3(b)Fit a logistic regression model of Y on X1 and X2
+```{r}
+log_mod <- glm(Y ~ X1 + X2 , family = binomial, data = nonlinear_data)
+summary(log_mod)
+# grid of points over sample space
+gr <- expand.grid(X1=seq(-5, 5, by=0.1), # sample points in X1
+X2=seq(-5, 5, by=0.1)) # sample points in X2
+YPred <- predict(log_mod, gr, type = 'response')
+YPred <- ifelse(YPred > 0.5, 1 , 0)
+ggplot(gr, aes(X1,X2)) + geom_raster(aes(fill = YPred), alpha = 0.5) + geom_point(data = nonlinear_data, col = 3 - nonlinear_data$Y)
+```
+3(c)Fit a model involving 2nd degree polynomial of X1 and X2 with interaction terms. You should use the poly() function. Inspect result of the fit using summary(). Plot the resulting decision boundary.
+```{r}
+log_mod2 <- glm(Y ~ poly(X1,2) + poly(X2,2) + X1:X2,data = nonlinear_data, family = binomial)
+summary(log_mod2)
+YPred2 <- predict(log_mod2, gr, type = 'response')
+YPred2 <- ifelse(YPred2 > 0.5, 1 , 0)
+ggplot(gr, aes(X1,X2)) + geom_raster(aes(fill = YPred2), alpha = 0.5) + geom_point(data = nonlinear_data, col = 3 - nonlinear_data$Y)
+```
+3(d)Using the same procedure, fit a logistic regression model with 5-th degree polynomials without any interaction
+terms. Inspect result of the fit using summary(). Plot the resulting decision boundary and discuss the result.
+Explain the reason for any strange behvaior.
+Because it is of degree 5, it tends to overfit the data. Therefore, from the graph, we can observe that the decision boundary is very close to the training data we have. 
+```{r}
+log_mod5 <- glm(Y ~ poly(X1,5) + poly(X2,5),data = nonlinear_data, family = binomial)
+summary(log_mod5)
+YPred5 <- predict(log_mod5, gr, type = 'response')
+YPred5 <- ifelse(YPred5 > 0.5, 1 , 0)
+ggplot(gr, aes(X1,X2)) + geom_raster(aes(fill = YPred5), alpha = 0.5) + geom_point(data = nonlinear_data, col = 3 - nonlinear_data$Y)
+```
+3(e)From the summary of both model, we can observe that the magnitude of coefficients of the degree 5 model is larger than those of degree 2 model, especially for X2 variables, and the magnitude of coefficients of the linear model is very small. We can find the degree 5 model is overfitting with low bias but high variance because it tries to best fit the data with variables up to degree of 5. The linear model obviously cannot well describe the data, so it has a high bias but low variance. The degree 2 model performs the best: although it has a higher bias than degree 5 model, it does not overfit the data and has a lower variance than degree 5 model that should have a much better performance on test data.  
+
+4(a)Split Caravan into a training set and a test set.
+```{r}
+library(ISLR)
+training_set <- Caravan[1:1000,]
+test_set <- Caravan[-1:-1000,]
+```
+
+4(b)Use the gbm to fit a 1,000 tree boosted model and set the shrinkage value of 0.01.PPERSAUT appears to be the most important.
+```{r}
+set.seed(1)
+boost_mod <- gbm(ifelse(Purchase == 'Yes', 1, 0)~. , data = training_set, distribution = 'bernoulli', n.trees = 1000, shrinkage = 0.01)
+summary(boost_mod)
+```
+4(c)Now fit a random forest model to the same training set from the previous problem. Set importance=TRUE but use the default parameter values for all other inputs to the randomForest function.
+The out-of-bag estimate of error rate is 6.1%. 9 variables were subsampled at each split in the trees. 500 trees were used to fit the data. The order of important variables are different for both boosting and random forest models.
+```{r}
+set.seed(1)
+rf_mod <- randomForest(Purchase ~. , data = training_set, importance = TRUE)
+rf_mod
+rf_mod$importance[order(rf_mod$importance[,4],decreasing = TRUE),]
+```
+4(d)47/304 of the people predicted to make a purchase do in fact make one.
+```{r}
+YPred_boost <- ifelse(predict(boost_mod, test_set, type = 'response') > 0.2 , 'Yes','No')
+YPred_rf <- ifelse((predict(rf_mod, newdata = test_set, type = 'prob')[,2]) > 0.2, 'Yes','No')
+table(pred = YPred_boost, truth = test_set$Purchase)
+table(pred = YPred_rf, truth = test_set$Purchase)
+```
+
+5(a)Split the data into training and test data. Use a random sample of 1500 observations for the training data and the rest as test data. Use a support vector machine to predict recent_cannabis_use using only the subset of predictors between Age and SS variables as on homework 3. Generate and print the confusion matrix of the predictions against the test data
+```{r}
+drug_use <- read_csv('drug.csv',
+col_names = c('ID','Age','Gender','Education','Country','Ethnicity', 'Nscore','Escore','Oscore','Ascore','Cscore','Impulsive', 'SS','Alcohol','Amphet','Amyl','Benzos','Caff','Cannabis', 'Choc','Coke','Crack','Ecstasy','Heroin','Ketamine','Legalh','LSD', 'Meth', 'Mushrooms', 'Nicotine', 'Semer','VSA'))
+drug_use <- drug_use %>%
+              mutate(recent_cannabis_use = as.factor(ifelse(Cannabis >= 'CL3', 1, 0)))
+drug_use_subset <- drug_use %>% select(Age:SS,recent_cannabis_use)
+set.seed(1)
+train.indeces = sample(1:nrow(drug_use_subset), 1500)
+drug_use_train = drug_use_subset[train.indeces,]
+drug_use_test = drug_use_subset[-train.indeces,]
+svmfit <- svm(recent_cannabis_use ~ ., data = drug_use_train, kernel = 'radial', cost = 1)
+YPred_svm <- predict(svmfit, drug_use_test)
+table(pred = YPred_svm, truth = drug_use_test$recent_cannabis_use)
+```
+
+5(b)Use the tune function to perform cross validation over the set of cost parameters: cost=c(0.001, 0.01, 0.1, 1,10,100). What is the optimal cost and corresponding cross validated training error for this model? Print the confusion matrix for the best model. The best model can be found in the best.model variable returned by tune.
+```{r}
+set.seed(1)
+tune.out <- tune(svm, recent_cannabis_use ~ . , data = drug_use_train, kernel = 'radial', ranges = list(cost = c(0.001, 0.01, 0.1, 1,10,100)))
+summary(tune.out)
+YPred_best_svm <- predict(tune.out$best.model,drug_use_test)
+table(pred = YPred_best_svm,drug_use_test$recent_cannabis_use)
+```

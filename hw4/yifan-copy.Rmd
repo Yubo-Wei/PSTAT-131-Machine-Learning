@@ -1,0 +1,337 @@
+---
+title: "PSTAT131 HW4"
+author: "Huiya Li and Yifan Wang 7983851"
+date: "6/2/2021"
+output: pdf_document
+---
+
+
+```{r setup}
+knitr::opts_chunk$set(echo = T,cache=TRUE)
+```
+
+```{r libraries, include=FALSE}
+library(tidyverse)
+library(tree)
+library(randomForest)
+library(gbm)
+library(ROCR)
+library(e1071)
+library(imager)
+```
+## Question 1
+1(a)
+There are n observations in bootstrap that can be picked from sample with replacement in total n^n ways. 
+If j th obs cannot be picked, there will be (n-1)^n cases.
+So, probability that j will not be in bootstrap is  $$p=((n-1)^n)/(n^n) = (1-1/n)^n$$
+
+1(b)
+Plugging n=1000, p=(1-1/1000)^(1000) = 0.36769
+
+1(c)
+```{r}
+set.seed(1)
+s =  sample(1:1000, size = 1000, replace = T)
+num.miss = 1000-length(unique(s))
+num.miss
+```
+```{r}
+p.s=num.miss/1000
+p.s
+```
+ The result is 0.37, which is similar to the theory probability.
+
+1(d)
+```{r}
+
+shots <- c(rep(1,62),rep(0,64))
+# bootstraps
+boot.shot <- NULL
+set.seed(1)
+for(i in 1:1000){
+  boot.shot <-c(boot.shot, mean(sample(shots,126,replace = T)))
+  boot.shot
+}
+```
+
+```{r}
+ggplot(as.data.frame(boot.shot), mapping = aes(x = boot.shot)) +
+  geom_histogram() 
+```
+```{r}
+# 95%CI
+quantile(boot.shot, 0.025)
+quantile(boot.shot, 0.975)
+```
+so the 95% CI is (0.4047619,0.5793651).
+
+Each shot attempt have 1/2 probability to success(1) and 1/2 probability to fail(0). 
+The expected value E = (1/2)*1 + (1/2)*0 = 1/2. Regression to the mean is the tendency for extreme or unusual socres or events to fall back toward the average. Hence, finally, Curry's three point field goal percentage will go to 0.5 < 11/19.
+
+## Question 2
+### Eigenfaces
+
+```{r faces_array}
+load("faces_array.RData")
+face_mat <- sapply(1:1000, function(i) as.numeric(faces_array[, , i])) %>% t
+plot_face <- function(image_vector) {
+  plot(as.cimg(t(matrix(image_vector, ncol=100))), axes=FALSE, asp=1)
+  }
+```
+
+##### a)
+
+```{r Average Face}
+avg_face <- colMeans(face_mat)
+plot_face(avg_face)
+```
+
+##### b)
+
+```{r,cache=TRUE}
+face_pr_out <- prcomp(face_mat, center = T, scale = F)
+face_pr_var <- face_pr_out$sdev^2
+face_pve <- face_pr_var/sum(face_pr_var)
+face_cumulative_pve <- cumsum(face_pve)
+```
+
+```{r PVE Face}
+par(mfrow = c(1,2))
+
+plot(face_pve, type="l", lwd=3, xlim = c(0,20),
+     xlab = 'Principal Component', ylab = 'PVE', main = 'Proportion of Variance \nExplained (Truncated)')
+points(face_pve, pch = 15)
+plot(face_cumulative_pve, type="l", lwd=3, xlab = 'Principal Component',
+     ylab = 'Cumulative PVE', main = 'Cumulative PVE')
+```
+
+The PVE plot is truncated to the first 20 principal components to demonstrate where adding components begin to contribute minimally to the explained variance.
+
+```{r 50 var}
+pc_50 <- which(face_cumulative_pve >= .5)[1]
+plot(face_cumulative_pve, type="l", xlim = c(0,pc_50+5), lwd=3, xlab = 'Principal Component',
+     ylab = 'Cumulative PVE', main = 'Cumulative PVE')
+abline(h=.5, v=pc_50)
+abline(v = c(pc_50 - 1, pc_50 + 1), lty = 3)
+```
+
+We can see from the plot above that 5 principal components gives us just over .5 on the cumulative PVE scale, so we need 5 principal components in order to obtain at least 50% of the total variation in the face images.
+
+##### c)
+
+```{r 16 PC Faces}
+par(mfrow=c(4,4), mar=c(1,1,1,1))
+for (i in 1:16){
+  plot_face(face_pr_out$rotation[ ,i])
+}
+```
+
+There are significantly higher amounts of lighter regions opposed to darker regions, although both light and dark regions showcase regions of high contrast. The contrast decreases through the 16 principal components and faces become more noticeable.
+
+##### d)
+
+```{r PC1}
+min_pc1 <- head(order(face_pr_out$x[ ,1]), n = 5)
+max_pc1 <- tail(order(face_pr_out$x[ ,1]), n = 5)
+
+par(mfrow=c(2,5), mar=c(1,1,1,1))
+for(i in c(min_pc1,max_pc1))
+  plot_face(face_mat[i, ])
+```
+
+The top row goes from the lowest value to the fifth lowest value from left to right while the bottom row goes from the fifth highest value to the highest value from left to right. The most obvious variation between the top row and the bottom row of the plot above is the contrast of the background with the face. The top row has completely black backgrounds while the bottom row has completely white backgrounds which greatly contrasts with the individual faces, therefore giving the most variability in the images as a whole.
+
+##### e) 
+
+```{r PC5}
+min_pc5 <- head(order((face_pr_out$x[ ,5])), n = 5)
+max_pc5 <- tail(order((face_pr_out$x[ ,5])), n = 5)
+
+par(mfrow=c(2,5), mar=c(1,1,1,1))
+for(i in c(min_pc5,max_pc5))
+  plot_face(face_mat[i, ])
+
+```
+The aspect of variability that is best captured in the 5th principal component is the length/type of the hair on the person's head. It looks like with a lower PC5 value, they person has less hair and with a higher PC5, the person has more/longer hair. I believe PC5 would be better at identifying a person's face because the hair is good indicator of a person's identity. Since PC1 only looks at the background behind the person's face, it is not as strong of an identifier as someone's hair/ hair length.
+
+## Question 3
+### Logistic regression with polynomial features
+
+##### a)
+
+```{r read nonlinear}
+nonlinear_data <- read_csv('nonlinear.csv') %>%
+                    mutate(Y = factor(Y))
+```
+
+```{r plot nonlinear}
+ggplot(nonlinear_data, aes(x=X1, y=X2, col=Y)) +
+  geom_point()
+```
+
+##### b)
+
+```{r logistic nonlinear}
+summary(nonlinear_fit <- glm(Y ~ X1 + X2, data = nonlinear_data, family="binomial"))
+
+# grid of points over sample space
+gr <- expand.grid(X1=seq(-5, 5, by=0.1), # sample points in X1
+                  X2=seq(-5, 5, by=0.1)) # sample points in X2
+
+nonlinear_yhat <- factor(ifelse(predict(nonlinear_fit, gr, type = "response") >= .5, 1, 0))
+```
+
+```{r nonlinear Decision Boundary}
+ggplot(gr, aes(x=X1,y=X2)) +
+  geom_raster(alpha = .5, aes(fill = nonlinear_yhat)) +
+  geom_point(data = nonlinear_data, aes(col=Y))
+```
+
+##### c)
+
+```{r nonlinear poly}
+summary(nonlinear_poly_fit <- glm(Y ~ poly(X1, degree = 2, raw = F)
+                                  + poly(X2, degree = 2, raw = F) + X1:X2,
+                                  data = nonlinear_data, family = "binomial"))
+```
+
+```{r nonlinear poly Decision Boundary}
+nonlinear_poly_yhat <- factor(ifelse(predict(nonlinear_poly_fit, gr, type = "response") >= .5, 1, 0))
+
+ggplot(mapping = aes(x=X1, y=X2)) +
+  geom_point(data = gr, shape = 8 , alpha = .5, aes(col = nonlinear_poly_yhat)) +
+  geom_point(data = nonlinear_data, aes(col = Y))
+```
+
+
+##### d)
+
+```{r nonlinear 5th poly}
+summary(nonlinear_5thpoly_fit <- glm(Y ~ poly(X1, degree = 5)
+                                  + poly(X2, degree = 5),
+                                  data = nonlinear_data, family = "binomial"))
+```
+
+```{r nonlinear 5th poly Decision Boundary}
+nonlinear_5thpoly_yhat <- factor(ifelse(predict(nonlinear_5thpoly_fit, gr, type = "response") >= .5, 1, 0))
+
+ggplot(mapping = aes(x=X1, y=X2)) +
+  geom_point(data = gr, shape = 8 , alpha = .5, aes(col = nonlinear_5thpoly_yhat)) +
+  geom_point(data = nonlinear_data,aes(col = Y))
+```
+
+The lack of an interaction plot gives us some undesirable results. A 5th-order polynomial does a fairly reasonable job in creating decision boundaries around the true separation, but we see an added boundary in the upper left corner that is not shown in the true-labeled plot. This region does not contain any actual data points, so it is possible that the model simply did not know what to do for those points.
+
+##### e)
+
+As the degree of the model increases, the model will approach a perfect fit of the data. A perfect fit of several points of data will create an extremely flexible curve that will fluctuate tremendously in magnitude, represented by these coefficients. Looking at the second-degree polynomial model, the degree is much smaller resembling lesser fluctuations, yielding smaller coefficients. Finally, with the linear model, a first-degree polynomial is simply a line, resembling no fluctuation and therefore contains smaller coefficients.
+
+
+## Question 4
+### Predicting insurance policy purchases
+##### a)
+
+```{r Caravan Train}
+library(ISLR)
+caravan_train <- Caravan[1:1000, ]
+caravan_test <- Caravan[-(1:1000), ]
+```
+
+##### b)
+
+```{r Boosting Model}
+set.seed(1)
+caravan_boost <- gbm(ifelse(Purchase == "Yes", 1, 0)~., data = caravan_train,
+                     distribution = "bernoulli", n.trees = 1000,
+                     shrinkage = .01, interaction.depth = 4)
+summary(caravan_boost)
+```
+
+The PPERSAUT, MKOOPKLA, and MOPLHOOG appear to be the most important preditors in this data set. 
+
+##### c)
+
+```{r caravan_forest}
+set.seed(1)
+caravan_forest <- randomForest(Purchase ~ ., data=caravan_train, importance=TRUE)
+caravan_forest
+```
+
+The OOB estimate of error rate is 6.1% with 9 variables subsampled at each split. The default number of trees selected was 500.
+
+```{r caravan_forest Importance}
+importance(caravan_forest)
+varImpPlot(caravan_forest, n = 10)
+```
+
+The order of variable importance differed between the boosting and random forest models. Actually, even the random forest model had different order of variable importance based on the impurity value chosen. For the mean decrease in accuracy, MRELOV, MBERMIDD, and MINK7512 were the most important, whereas for the mean decrease in MOSTYPE, MGODGE, and PPERSAUT were determined to be the most important.
+
+##### d)
+
+```{r Caravan Boosting Predict}
+caravan_boost_yhat <- ifelse(predict(caravan_boost, newdata = caravan_test,
+                                     n.trees = 1000, type = "response") > .2,
+                             "Yes", "No")
+                             
+(caravan_boost_err <- table(Boost_Predict = caravan_boost_yhat, Truth = caravan_test$Purchase))
+```
+
+```{r Caravan Forest Predict}
+caravan_forest_yhat <- ifelse(predict(caravan_forest, newdata = caravan_test, type = "prob")[ ,2] > .2,
+                              "Yes", "No")
+(caravan_forest_err <- table(Forest_Predict = caravan_forest_yhat, Truth = caravan_test$Purchase))
+```
+
+```{r Caravan Forest Fraction}
+caravan_forest_err[2,2] / sum(caravan_forest_err[2, ])
+```
+
+
+## Question 5
+```{r}
+drug_use <- read_csv('drug.csv',
+col_names = c('ID','Age','Gender','Education','Country','Ethnicity',
+                                 'Nscore','Escore','Oscore','Ascore','Cscore','Impulsive',
+                                'SS','Alcohol','Amphet','Amyl','Benzos','Caff','Cannabis',
+                                'Choc','Coke','Crack','Ecstasy','Heroin','Ketamine','Legalh','LSD',
+                                'Meth', 'Mushrooms', 'Nicotine', 'Semer','VSA'))
+drug_use <- drug_use %>%
+  mutate(recent_cannabis_use=factor(ifelse(Cannabis >= "CL3", "Yes", "No"), levels=c("No","Yes")))
+drug_use_subset <- drug_use %>% select(Age:SS, recent_cannabis_use)
+```
+```{r}
+set.seed(1)
+#sample 1500 obs as training data
+train_index = sample(1:nrow(drug_use_subset),1500)
+drug_use_train = drug_use_subset[train_index,]
+# the rest as test data
+drug_use_test = drug_use_subset[-train_index,]
+```
+
+5(a)
+```{r}
+svm.drug=svm(recent_cannabis_use~., data = drug_use_train, kernel = "radial", cost = 1)
+
+table(true = drug_use_test$recent_cannabis_use,
+      pred = predict(svm.drug, newdata = drug_use_test))
+```
+
+5(b)
+```{r}
+set.seed(1)
+tune.svm = tune(svm, recent_cannabis_use ~., data=drug_use_train, kernel="radial",
+                ranges=list(cost = c(0.001, 0.01,0.1,1,10,100)))
+```
+
+```{r}
+summary(tune.svm)$"best.parameters"
+summary(tune.svm)$"best.performance"
+```
+The optimal cost is 1. CV training error is 0.1846667.
+
+```{r}
+best.mod = tune.svm$best.model
+table(true = drug_use_test$recent_cannabis_use,
+      pred = predict(best.mod, newdata = drug_use_test))
+
+```

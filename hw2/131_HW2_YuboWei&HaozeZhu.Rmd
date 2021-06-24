@@ -1,0 +1,199 @@
+---
+title: "PSTAT131_HW2"
+author: "YuboWei_&HaozeZhu"
+date: "5/2/2021"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+## Load library and read dataset
+
+```{r setup}
+library(tidyverse)
+library(tree)
+library(plyr)
+library(class)
+library(rpart)
+library(maptree)
+library(ROCR)
+rm(list = ls())
+
+spam <- read_table2("spambase.tab", guess_max=2000)
+spam <- spam %>%
+  mutate(y = factor(y, levels=c(0,1), labels=c("good", "spam"))) %>%
+  mutate_at(.vars=vars(-y), .funs=scale)
+```
+
+
+```{r }
+calc_error_rate <- function(predicted.value, true.value){ return(mean(true.value!=predicted.value)) }
+records = matrix(NA, nrow=3, ncol=2) 
+colnames(records) <- c("train.error","test.error") 
+rownames(records) <- c("knn","tree","logistic")
+set.seed(1) 
+test.indices = sample(1:nrow(spam), 1000) 
+spam.train=spam[-test.indices,] 
+spam.test=spam[test.indices,]
+nfold = 10 
+set.seed(1) 
+folds = seq.int(nrow(spam.train)) %>% cut(breaks = nfold, labels=FALSE) %>% sample
+```
+
+## K-Nearest Neighbor Method
+
+1. (Selecting number of neighbors)
+```{r}
+## split train and test data set into two set
+YTrain = spam.train$y
+XTrain = spam.train %>% select(-y) 
+XTest = spam.test %>% select(-y) 
+YTest = spam.test$y
+do.chunk <- function(chunkid, folddef, Xdat, Ydat, k){
+train = (folddef!=chunkid)
+Xtr = Xdat[train,] 
+Ytr = Ydat[train]
+Xvl = Xdat[!train,] 
+Yvl = Ydat[!train]
+## get classifications for current training chunks
+predYtr = knn(train = Xtr, test = Xtr, cl = Ytr, k = k)
+## get classifications for current test chunk 
+predYvl = knn(train = Xtr, test = Xvl, cl = Ytr, k = k)
+
+data.frame(train.error = calc_error_rate(predYtr, Ytr), val.error = calc_error_rate(predYvl, Yvl))
+}
+kvec = c(1, seq(10, 50, length.out=5))
+error.folds = NULL
+# Loop through different number of neighbors 
+for (i in kvec){
+tmp = ldply(1:nfold, do.chunk, folddef=folds, Xdat=XTrain, Ydat=YTrain, k=i) # Necessary arguments to be passed into do.chunk 
+            tmp$neighbors = i # Keep track of each value of neighors
+            error.folds = rbind(error.folds, tmp) # combine results
+}
+## get mean val.error in each neighbors
+x <- data.frame(matrix(ncol = 2, nrow = 0))
+colnames(x) <- c('neighbors', 'mean.val.error')
+for (i in kvec){
+  errors = error.folds %>% filter(neighbors== i) %>% summarise(mean.val.error = mean(val.error))
+  x[nrow(x) + 1,] = c(i,errors)
+}
+# Best number of neighbors
+neighbors = x[which.min(x$mean.val.error),1]
+neighbors
+```
+
+
+2. Training and Test Errors of knn fit
+
+```{r}
+## get classifications for current training chunks
+predYtr = knn(train = XTrain, test = XTrain, cl = YTrain, k = 10)
+## get classifications for current test chunk
+predYvl = knn(train = XTrain, test = XTest, cl = YTrain, k = 10)
+
+knn_train_error = calc_error_rate(predYtr, YTrain)
+knn_test_error = calc_error_rate(predYvl, YTest)
+## Fill in the ﬁrst row of records with the train and test error from the knn ﬁt.
+records[1,1] = knn_train_error
+records[1,2] = knn_test_error
+records
+```
+
+## Decision Tree Method
+3.(Controlling Decision Tree Construction)
+```{r}
+spamtree = tree(y~.,control = tree.control(nobs=(nrow(spam.train)), minsize = 5,mindev = 1e-5),data = spam.train)
+summary(spamtree)
+```
+There are 149 leaf nodes in this tree, and 49 training observations are misclassiﬁed.
+
+4. (Decision Tree Pruning)
+```{r}
+draw.tree(prune.tree(spamtree, best=10), nodeinfo=TRUE,cex = 0.5)
+```
+
+5. Use cross validation to prune the tree
+
+```{r}
+# Set random seed 
+set.seed(1)
+cv = cv.tree(spamtree, rand = folds, FUN=prune.misclass, K=10)
+best.size.cv = 22
+# Plot size vs. cross-validation error rate
+plot(cv$size , cv$dev, type="b", 
+     xlab = "Number of leaves, \'best\'", ylab = "CV Misclassification Error",
+     col = "red", main="CV")
+  abline(v=best.size.cv, lty=2)
+  
+```
+
+6. Training and Test Errors of pruned tree fit
+
+```{r}
+# prune the original tree using the best size in 5
+spamtree.pruned = prune.misclass(spamtree, best=best.size.cv)
+## get classifications for current training chunks
+tree.pred.train = predict(spamtree.pruned, spam.train, type="class")
+## get classifications for current test chunk
+tree.pred.test = predict(spamtree.pruned, spam.test, type="class")
+## get train error rate and test error rate
+tree_train_error = calc_error_rate(tree.pred.train, YTrain)
+tree_test_error = calc_error_rate(tree.pred.test, YTest)
+## record the error rates
+records[2,1] = tree_train_error
+records[2,2] = tree_test_error
+```
+## Logistic regression
+
+7.a
+$$p(z)=\frac{e^{z}}{1+e^{z}}$$
+$$p(1+e^{z})=e^{z}$$
+$$p+pe^{z}=e^{z}$$
+$$e^{z}(1-p)=p$$
+$$e^{z}=\frac{p}{1-p}$$
+$$ln(e^{z})=ln(\frac{p}{1-p})$$
+$$z(p)=ln(\frac{p}{1-p})$$
+7.b 
+Assume that $z = \beta_0+\beta_1x_1$ , and p = logistic(z).
+If we increase $x1$ by 2, we will increase the odds of the outcome multiplicatively by $e^{2\beta_1}$.
+$$
+p=\operatorname{logit}^{-1}(z)=\frac{e^{z}}{1+e^{z}}=\frac{e^{\beta_{0}+\beta_{1} x_{1}}}{1+e^{\beta_{0}+\beta_{1} x_{1}}}
+$$
+Since we assume $\beta_{1}$ is negative, as $x_{1} \rightarrow \infty, \beta_{1} x_{1} \rightarrow-\infty$. Therefore,
+$$
+\lim _{x \rightarrow \infty} \frac{e^{-\infty}}{1+e^{-\infty}}=\frac{0}{1}=0
+$$
+The probability converges to 0 . Also,
+$$
+\lim _{x \rightarrow-\infty} \frac{e^{\beta_{0}+\beta_{1} x_{1}}}{1+e^{\beta_{0}+\beta_{1} x_{1}}}=\lim _{x \rightarrow \infty} \frac{e^{\beta_{0}+\left|\beta_{1} x_{1}\right|}}{1+e^{\beta_{0}+\left|\beta_{1} x_{1}\right|}}
+$$
+and, by L'Hopital's rule, the probability converges to $1 .$
+
+
+8.Use logistic regression to perform classiﬁcation
+```{r}
+## build model using logistic regression
+glm.fit = glm(y ~ ., data=spam.train, family=binomial)
+summary(glm.fit)
+## get tranning error rate
+prob.training = predict(glm.fit, type="response")
+log_pred_train=as.factor(ifelse(prob.training<=0.5, "good", "spam"))
+log_train_error = calc_error_rate(log_pred_train, YTrain)
+## get test error rate
+prob.test = predict(glm.fit,spam.test, type="response")
+log_pred_test=as.factor(ifelse(prob.test<=0.5, "good", "spam"))
+log_test_error = calc_error_rate(log_pred_test, YTest)
+## record the error rates
+records[3,1] = log_train_error
+records[3,2] = log_test_error
+records
+```
+logistic regression method had the lowest misclassiﬁcation error on the test set
+
+9. If I am the designer of a spam ﬁlter,I will be more concerned about the potential for false positive rates that are too large than true positive rates that are too small. 
+A false positive rates that are too large means some important emails are listed as spam emails and filered by the algorithm. This would casue more damage to the users than a few spam emails passes through the algorithm.
+
+
+
+
+

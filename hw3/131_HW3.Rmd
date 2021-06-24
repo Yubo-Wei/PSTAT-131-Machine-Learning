@@ -1,0 +1,227 @@
+---
+title: 'PSTAT 131 Homework 3'
+author: "HaozeZhu & Yubo Wei"
+date: "05/21/22"
+output: pdf_document
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancypagestyle{plain}{\pagestyle{fancy}}
+  - \fancyhead[LE, LO]{PSTAT 131 - Homework 3}
+  - \newcommand{\magenta}[1]{\textcolor{magenta}{#1}}
+---
+
+```{r setup}
+##loading library
+
+library(tidyverse) 
+library(ROCR) 
+library(tree) 
+library(maptree) 
+library(class) 
+library(lattice) 
+library(ggridges) 
+library(superheat)
+## loading the drug dataset and transform variales
+drug_use <- read_csv('drug.csv',
+col_names = c('ID','Age','Gender','Education','Country','Ethnicity', 'Nscore','Escore','Oscore','Ascore','Cscore','Impulsive', 'SS','Alcohol','Amphet','Amyl','Benzos','Caff','Cannabis',
+'Choc','Coke','Crack','Ecstasy','Heroin','Ketamine', 'Legalh','LSD','Meth','Mushrooms','Nicotine','Semer','VSA'))
+
+drug_use <- drug_use %>% mutate_at(as.ordered, .vars=vars(Alcohol:VSA)) 
+drug_use <- drug_use %>%
+mutate(Gender = factor(Gender, labels=c("Male", "Female"))) %>% mutate(Ethnicity = factor(Ethnicity, labels=c("Black", "Asian", "White", "Mixed:White/Black", "Other", "Mixed:White/Asian", "Mixed:Black/Asian"))) %>% mutate(Country = factor(Country, labels=c("Australia", "Canada", "New Zealand", "Other", "Ireland", "UK", "USA")))
+```
+
+##1. Logistic regression for drug use prediction
+###a
+```{r cars}
+## create a new factor response variable recent_cannabis_use
+drug_use = drug_use %>% mutate(recent_cannabis_use=ifelse(Cannabis >= "CL3","Yes","No"))%>% mutate(recent_cannabis_use = factor(recent_cannabis_use,levels=c("No", "Yes")))
+
+```
+
+###b
+```{r}
+##create a new tibble
+drug_use_subset <- drug_use %>% select(Age:SS, recent_cannabis_use)
+##Split drug_use_subset into a training data set and a test data set
+set.seed(1) 
+training.indices = sample(1:nrow(drug_use_subset), 1500)
+drug_use_train = drug_use_subset[training.indices,]
+drug_use_test = drug_use_subset[-training.indices,]
+dim(drug_use_train)
+dim(drug_use_test)
+```
+###c
+```{r}
+##Fit a logistic regression
+glm.fit = glm(recent_cannabis_use ~ ., data=drug_use_train, family=binomial) 
+# Summarize the logistic regression model 
+summary(glm.fit)
+```
+##2. Decision tree models of drug use
+
+```{r}
+## Construct a decision tree
+tree_parameters = tree.control(nobs=nrow(drug_use_train), minsize=10, mindev=1e-3)
+drugtree = tree(recent_cannabis_use~.,control = tree_parameters,data = drug_use_train)
+```
+
+###a Use 10-fold CV to select the a tree
+```{r}
+# Set random seed 
+set.seed(1)
+cv = cv.tree(drugtree,FUN=prune.misclass, K=10)
+best.size.cv = 6
+plot(cv$size , cv$dev, type="b", 
+     xlab = "Number of leaves, \'best\'", ylab = "CV Misclassification Error",
+     col = "red", main="CV")
+abline(v=best.size.cv, lty=2)
+```
+
+###b Prune the tree
+```{r}
+# prune the original tree using the best size in a
+drugtree.pruned = prune.misclass(drugtree, best=best.size.cv)
+draw.tree(drugtree.pruned, nodeinfo=TRUE,cex = 0.5)
+```
+The variable 'Country' is split ﬁrst in this decision tree.
+
+###c Compute and print the confusion matrix for the test data
+```{r}
+# Predict on test set 
+predictions = predict(drugtree.pruned, drug_use_test, type="class")
+# get the true response of the test data
+truth = drug_use_test$recent_cannabis_use
+# Obtain confusion matrix
+confusion_matrix = table(truth, predictions)
+confusion_matrix
+
+```
+```{r}
+# get true positive rate
+true_positive_rate = confusion_matrix[2,2]/sum(confusion_matrix[2,])
+true_positive_rate
+```
+```{r}
+# get false positive rate
+false_positive_rate = confusion_matrix[1,2]/sum(confusion_matrix[1,])
+false_positive_rate
+```
+
+##3.Model Comparison
+###a
+```{r}
+# get predition from logistic regression model using test data
+prob_log_testing = predict(glm.fit,drug_use_test,type="response")
+pred_log = prediction(prob_log_testing, truth)
+#calculate the True Positive Rate and False Positive Rate by performance()
+perf_log = performance(pred_log, measure="tpr", x.measure="fpr")
+# for the decision tree model
+prob_tree_testing = predict(drugtree.pruned,newdata=drug_use_test)[,2]
+pred_tree = prediction(prob_tree_testing,truth)
+perf_tree = performance(pred_tree, measure="tpr", x.measure="fpr")
+
+plot(perf_log, col=2, lwd=3, main="ROC curve") 
+plot(perf_tree, col=3, lwd=3,add=TRUE) 
+legend(x="bottomright",legend=c("Logistics", "decision tree"),
+       col=c(2, 3), lty=1, cex=0.8)
+abline(0,1)
+```
+###b
+```{r}
+##Compute the AUC for logistic regression model
+auc_log = performance(pred_log, "auc")@y.values
+auc_log
+```
+```{r}
+##Compute the AUC for decision tree model
+auc_tree= performance(pred_tree, "auc")@y.values
+auc_tree
+```
+The logistic regression model has larger AUC, which suggests overall the logistic regression model is a better model.
+
+##4. Clustering and dimension reduction for gene expression data
+```{r,results='hide'}
+## read leukemia_data
+leukemia_data <- read_csv("leukemia_data.csv")
+```
+
+###a
+```{r}
+##Convert the Type column to factor
+leukemia_data = leukemia_data %>% mutate(Type = factor(Type))
+##the number of patients with each leukemia subtype
+table(leukemia_data$Type)
+```
+Subtype "BCR-ABL" occurs the least in this data
+
+###b
+```{r}
+## exclude the Type column
+leukemia_data_wt = leukemia_data %>% select(-Type)
+pr.out=prcomp(leukemia_data_wt, scale=TRUE, center = TRUE)
+## get the variance explained by each principal component
+pr.var=pr.out$sdev ^2
+pve=pr.var/sum(pr.var)
+## get cumulative pve
+cumulative_pve = cumsum(pve)
+## plot PVE and cumulative pve
+par(mfrow=c(1, 2))
+plot(pve, type="l", lwd=3)
+plot(cumulative_pve, type="l", lwd=3)
+```
+###c
+```{r}
+## set color
+rainbow_colors <- rainbow(7) 
+plot_colors <- rainbow_colors[leukemia_data$Type]
+plot(pr.out$x[,1],pr.out$x[,2],xlab="PC1", ylab="PC2",cex=0.5)
+text(pr.out$x[,1],pr.out$x[,2],labels = leukemia_data$Type,col=plot_colors,cex=0.6)
+```
+T-ALL is most clearly separated from the others along the PC1 axis
+```{r}
+## select PC1 value for loadings
+pc_1 = pr.out$rotation[,1]
+## sort the PC1 value
+pc_1_sorted= sort(abs(pc_1),decreasing = TRUE)
+head(pc_1_sorted,1)
+```
+SEMA3F has the highest absolute loadings for PC1
+```{r}
+## Print the ﬁrst 6 genes in this sorted vector
+head(pc_1_sorted,6)
+```
+
+
+
+###f
+```{r}
+## load dendextend library
+library(dendextend)
+##subsetting to include only rows for which Type is either T-ALL, TEL-AML1, or Hyperdip50
+leukemia_subset_1 <- filter(leukemia_data, Type == c("T-ALL","TEL-AML1","Hyperdip50"))
+## exclude the first column Type
+leukemia_subset = leukemia_subset_1 %>% select(-Type)
+## calculate the distance matrix
+subset_dist = dist(leukemia_subset)
+set.seed(1)
+## Hierarchical Clustering using complete linkage
+drug.hclust = hclust(subset_dist)
+```
+
+```{r}
+## first plot
+
+x = as.dendrogram(drug.hclust)
+x %>% set_labels(leukemia_subset_1$Type[order.dendrogram(x)]) %>% set("labels_col",k=3) %>% set("branches_k_color", k = 3) %>%
+  set("labels_cex", 0.3) %>% plot(main='Three Groups for hclust',horiz = TRUE)
+```
+```{r}
+## second plot
+y = as.dendrogram(drug.hclust)
+y %>% set_labels(leukemia_subset_1$Type[order.dendrogram(y)]) %>% 
+  set("labels_col",k=5) %>% set("branches_k_color", k = 5) %>%
+  set("labels_cex", 0.3) %>% plot(main='Five Groups for hclust',horiz = TRUE)
+```
+

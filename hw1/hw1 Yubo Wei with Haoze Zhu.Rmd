@@ -1,0 +1,268 @@
+---
+title: 'PSTAT 131 Homework 1'
+author: ""
+date: ""
+output: pdf_document
+header-includes:
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancypagestyle{plain}{\pagestyle{fancy}}
+  - \fancyhead[LE, LO]{PSTAT 131 - Homework 1}
+  - \newcommand{\magenta}[1]{\textcolor{magenta}{#1}}
+---
+
+```{r setup, echo=FALSE}
+library(ISLR)
+library(reshape2)
+library(class)
+library(tidyverse)
+library(MASS)
+algae <- read_table2("algaeBloom.txt", col_names=
+                       c('season','size','speed','mxPH','mnO2','Cl','NO3','NH4',
+                         'oPO4','PO4','Chla','a1','a2','a3','a4','a5','a6','a7'),
+                     na="XXXXXXX")
+knitr::opts_chunk$set(fig.width=7, fig.height=5)
+```
+\newcommand{\gs}{\textcolor{magenta}}
+### 1a
+```{r}
+#1 a 
+algae %>%
+  dplyr::count(season)
+```
+### 1b
+```{r}
+#1 b
+algae[rowSums(is.na(algae))==1,]
+# Yes, there are some missing values.
+data1 = algae%>%
+  summarise(dplyr::across(c(mxPH, mnO2, Cl, NO3, NH4, oPO4, PO4, Chla), list(mean = mean, variance = var), na.rm = TRUE))
+data1
+# All chemcials except for the maximum pH value and minimum O2 value tend to have a high variance.
+```
+### 1c
+```{r}
+
+# 1c 
+data2 = algae%>%
+  summarise(across(c(mxPH, mnO2, Cl, NO3, NH4, oPO4, PO4, Chla), list(median = median, MAD = mad), na.rm = TRUE, constant = 1))
+data2
+# the numbers in median & MAD are smaller, look more reasonable. It seems outliers have smaller impact on median & MAD.
+
+```
+### 2a
+```{r}
+# 2a
+library(ggplot2)
+ggplot(data = algae)+
+  geom_histogram(aes(x = mxPH, y = ..density..),na.rm = TRUE)+
+  ggtitle("Histogram of mxPH")+
+  theme_light()
+# the distribution is not skewed
+```
+### 2b
+```{r}
+# 2b
+ggplot(data = algae)+
+  geom_histogram(aes(x = mxPH, y = ..density..),na.rm = TRUE)+
+  geom_density(aes(x = mxPH),na.rm = TRUE) +
+  geom_rug(aes(x = mxPH))+
+  ggtitle("Histogram of mxPH")+
+  theme_light()
+```
+### 2c
+```{r}
+a_one <- algae %>% group_by(size) %>% summarise(a1)
+a_one %>% ggplot(aes(size,a1))+
+  geom_boxplot()+
+  ggtitle("A conditioned Boxplot of Algal a1")+
+  theme_light()
+```
+
+### 2d
+
+```{r}
+boxplot(algae$NO3,
+  ylab = "NO3"
+)
+boxplot.stats(algae$NO3)$out
+boxplot(algae$NH4,
+        ylab = "NH4")
+boxplot.stats(algae$NH4)$out
+# yes there are some outliers for NO3 and NH4.
+# I arrive at this conclusion by ploting the boxplot
+```
+### 2e 
+```{r}
+# 2e
+algae%>%
+  summarise(across(c(NO3, NH4), list(mean = mean, variance = var), na.rm = TRUE))
+algae%>%
+  summarise(across(c(NO3, NH4), list(median = median, MAD = mad), na.rm = TRUE, constant = 1))
+# the variance for NO3 is fine. but the variance for NH4 is crazy because of some outliers
+# median&MAD data look more reasonable.
+# median&MAD data are more robust when outliers are present.
+```
+
+### 3a 
+```{r}
+
+# 3a 
+nrow(algae[rowSums(is.na(algae))== FALSE,])
+#  16 observations contain missing values.
+algae %>%
+  summarize(across(c(season, size, speed, mxPH, mnO2, Cl, NO3, NH4, oPO4, PO4, Chla, a1,a2,a3,a4,a5,a6,a7),list(missing = ~ sum(is.na(.x)))))
+```
+### 3b
+```{r}
+# 3b 
+algae.del <- algae[complete.cases(algae),]
+nrow(algae.del)
+# 184 observations are in algae.del.
+
+```
+### 3c
+```{r}
+# 3c
+algae.med <-algae %>% 
+  mutate_at(vars(season, size, speed, mxPH, mnO2, Cl, NO3, NH4, oPO4, PO4, Chla, a1,a2,a3,a4,a5,a6,a7), funs(ifelse(is.na(.), median(., na.rm = TRUE),.)))
+algae.med[c(48,62,199), ]
+
+```
+### 3d
+```{r}
+# 3d
+algae%>%
+  dplyr::select(4:11) %>%
+  cor(., use = "na.or.complete")
+fit <- lm(data = algae, PO4 ~ oPO4)
+1.293 * algae[28,9] + 42.897
+```
+### 3e 
+```{r}
+# 3e 
+# Because of the survivorship bias, we cannot simply use other obeserved data to fill in missing values.
+# Wen examing how bullet patterns affect the probability of survial of planes, we don't have data from crashed planes,
+# for example, engine down might be the biggest impact, but planes won't come back if the engine is down. 
+# This means most of our observations have a functioning engine which may underestimate its impact.
+# Imputing data using either the median or correlation method could also increase the bias in the prediction. 
+
+```
+### 4a
+```{r}
+library(plyr)
+# 4 a
+do.chunk <- function(chunkid, chunkdef, dat){ # function argument
+  train = (chunkdef != chunkid)
+  Xtr = dat[train,1:11] # get training set
+  Ytr = dat[train,12] # get true response values in trainig set
+  Xvl = dat[!train,1:11] # get validation set
+  Yvl = dat[!train,12] # get true response values in validation set
+  lm.a1 <- lm(a1~., data = dat[train,1:12])
+  predYtr = predict(lm.a1) # predict training values
+  predYvl = predict(lm.a1,Xvl) # predict validation values
+  data.frame(fold = chunkid,
+             train.error = mean(as.matrix((predYtr-Ytr)^2)), # compute and store training error 
+             val.error = mean(as.matrix((predYvl-Yvl)^2)))# compute and store test error
+}
+set.seed(1)
+nfold = 5
+folds = cut(1:nrow(algae.med), breaks = nfold, labels = FALSE) %>%
+  sample()
+```
+### 4b
+```{r}
+# 4 b
+tmp = ldply(1:nfold,do.chunk,chunkdef=folds,dat=algae.med)
+tmp
+```
+### 5 
+```{r}
+# 5 
+algae.Test <- read_table2('algaeTest.txt',
+                          col_names=c('season','size','speed','mxPH','mnO2','Cl','NO3',
+                                      'NH4','oPO4','PO4','Chla','a1'),
+                          na=c('XXXXXXX'))
+fit_all <- lm(a1~., data = algae.med[1:12])
+X <- algae.Test[,1:11]
+pred <- predict(fit_all,X)
+real_error <- mean((pred - algae.Test$a1)^2)
+real_error
+#The true error here is 250.1794, which is roughly what I expected based on the CV estimated test error from part 4.
+```
+### 6
+```{r}
+# 6 a
+head(Wage)
+ggplot(data = Wage, aes(x = age, y = wage))+
+  geom_point()+
+  geom_smooth()+
+  theme_light()
+# wage grows as age grows, when age >40 & age < 60, the pattern is flat, 
+# when age > 60, the wage goes down as age increases.
+# It matches what I expect. It is reasonable in daily life. For example, people who get first jobs usually have lower salary, and their salaries will increases as they working for many years.
+```
+### 6b
+```{r}
+# 6 b
+set.seed(3)
+folds2 = cut(1:nrow(Wage), breaks = nfold, labels = FALSE) %>%
+  sample()
+
+do.chunk3 <- function(chunkid, chunkdef, dat, degree){
+  train = (chunkdef != chunkid)
+  Xtr = dat[train, 1:10]
+  Ytr = dat[train, 11]
+  Xvl = dat[!train, 1:10]
+  Yvl = dat[!train, 11]
+  lm <- lm(wage~poly(age, degree, raw = F), data = dat[train, 1:11])
+  predYtr = predict(lm)
+  predYvl = predict(lm, Xvl)
+  data.frame(fold = chunkid,
+             p = degree,
+             train.error = mean((predYtr - Ytr)^2), # compute and store training error
+             val.error = mean((predYvl - Yvl)^2)) 
+}
+do.chunk4 <- function(chunkid, chunkdef, dat){
+  train = (chunkdef != chunkid)
+  Xtr = dat[train, 1:10]
+  Ytr = dat[train, 11]
+  Xvl = dat[!train, 1:10]
+  Yvl = dat[!train, 11]
+  lm <- lm(wage~1, data = dat[train, 1:11])
+  predYtr = predict(lm)
+  predYvl = predict(lm, Xvl)
+  data.frame(fold = chunkid,
+             train.error = mean((predYtr - Ytr)^2), # compute and store training error
+             val.error = mean((predYvl - Yvl)^2)) 
+}
+final = NULL
+temp4 <- ldply(1:5, do.chunk4, chunkdef = folds2, dat = Wage)
+final = temp4%>%
+  summarize(av_train_error = mean(train.error), av_val_error = mean(val.error), degree = 0)
+for(i in 1:10){
+  temp = (ldply(1:5, do.chunk3, chunkdef = folds2, dat = Wage, degree = i))
+  temp2 = temp%>%
+  summarize(av_train_error = mean(train.error), av_val_error = mean(val.error), degree = i)
+  final <- rbind(final, temp2)
+}
+final
+ggplot(data = final)+
+  geom_line(aes(x = degree, y = av_train_error, color = "av_train_error"))+
+  geom_line(aes(x = degree, y = av_val_error, color = "av_val_error"))
+# As p increases, both errors go down.
+# training error is even lower. 
+which(final$av_val_error == min(final$av_val_error)) - 1
+# we should choose 9 as the degree.
+
+```
+
+
+
+
+
+
+
+
+
+

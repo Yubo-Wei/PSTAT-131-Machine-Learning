@@ -1,0 +1,137 @@
+---
+title: "PS131_Final_Draft1"
+author: "Haoze"
+date: "6/10/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. What makes voter behavior prediction (and thus election forecasting) a hard problem?
+
+  Voter behavior varies over time. A change in unemployment rate in a particular state  can affect voter intention in that states. National change such as rise in federal tax could lead to variation in voter intention nationwide. However, some changes in voter behavior are difficult to measure such as a successful campaign ad. 
+
+2. What was unique to Nate Silver's approach in 2012 that allowed him to achieve good predictions?
+
+  Silver uses hierarchical modelling with adjustment to voter behavior, the house effect, and sampling variation. Instead of maximising probability of variation of the support, Silver looks at the full range of probabilitiesuses and uses Bayer's Theorem and graph theory to calculate the new probabilities of each level of support.This model can also be simulated forward in time for each estimated level of support. As much polling data become available towards the end of the election campaign, Silver can get better estimates of public support for Obama.
+  
+3. What went wrong in 2016? What do you think should be done to make future predictions better?
+
+  All polls has errors. It is possilbe that there is systematic polling error in state polls cause the forecasts based on them miss in the same direction. The polls underestimated Trumps support in group likes whites without college degrees. Trump voters might be too shy to tells pollsters whom they were supporting, especially women. We need a better statistical model to estimate these errors efficiently in the future.
+
+```{r}
+## set the working directory as the file location
+setwd(getwd())
+## put the data folder and this handout file together.
+## read data and convert candidate from string to factor
+election.raw <- read_delim("data/election/election.csv", delim = ",") %>% mutate(candidate=as.factor(candidate))
+```
+
+4. 
+
+```{r}
+## removing rows with fips=2000
+election.raw = filter(election.raw, fips!=2000)
+## demension of new election.raw
+dim(election.raw)
+```
+The new election.raw has demension of $18345*5$.
+
+5. Remove summary rows from election.raw data
+```{r}
+## get summary rows from election.raw
+summary_row = filter(election.raw, is.na(county))
+## separate summary rows into `election_federal` and `election_state`
+election_federal = filter(summary_row, fips=='US')
+election_state = filter(summary_row, fips!='US')
+## Remove summary rows from election.raw data
+election = filter(election.raw, !is.na(county))
+```
+
+6.
+There are 31 named presidential candidates in the 2016 election.
+```{r}
+## a log-scale bar chart of all votes received by each candidate
+ggplot(data=election_federal, aes(x=candidate, y=votes)) +
+  geom_bar(stat="identity", width=0.5)+
+  scale_y_log10()+
+  theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5))
+```
+
+7.
+```{r}
+## county_winner
+county_winner = election %>% group_by(fips) %>% summarise(county,candidate,pct = votes/sum(votes)) %>% top_n(1)
+## state_winner
+state_winner =election_state %>% group_by(fips) %>% summarise(candidate,pct = votes/sum(votes)) %>% top_n(1,pct)
+```
+
+8. Draw county-level map by creating counties = map_data("county"). Color by county
+```{r}
+states <- map_data("state")
+counties = map_data("county")
+ggplot(data = counties) + 
+  geom_polygon(aes(x = long, y = lat, fill = region, group = group), color = "white") + 
+  coord_fixed(1.3) +
+  guides(fill=FALSE)  # color legend is unnecessary and takes too long
+```
+
+9. Now color the map by the winning candidate for each state.
+
+```{r}
+# add fips with state.abb into dataset 'states'
+states = states %>% mutate(fips = state.abb[match(region, tolower(state.name))])
+# left join states with election_state
+map_state = left_join(state_winner,states,by = "fips")
+# color the map by the winning candidate for each state
+ggplot(data = map_state) + 
+  geom_polygon(aes(x = long, y = lat, fill = candidate, group = group), color = "white") + 
+  coord_fixed(1.3) +
+  guides(fill=FALSE)  # color legend is unnecessary and takes too long
+```
+10.
+```{r}
+# maps::county.fips.  Split the polyname column to region and subregion
+county.fips = separate(maps::county.fips,col = "polyname",',', into = c('region','subregion'))
+# Use left_join() combine county.fips into county.
+new_counties = left_join(county.fips,counties,by = "subregion")
+# change fips column into character varible.
+new_counties = new_counties %>% mutate(fips = as.character(fips))
+# left_join() new_counties with variable county_winner
+map_counties = left_join(new_counties,county_winner,by = "fips")
+# color the map by the winning candidate for each county
+ggplot(data = map_counties) + 
+  geom_polygon(aes(x = long, y = lat, fill = candidate, group = group), color = "white") + 
+  coord_fixed(1.3) +
+  guides(fill=FALSE)  # color legend is unnecessary and takes too long
+
+```
+12.
+```{r}
+# Clean census data census.del
+# remove any rows with missing values
+census.del = na.omit(census)
+# convert {Men, Employed, Citizen} attributes to percentages in census.del
+census.del = census.del %>% mutate(Men = Men/TotalPop)%>% 
+  mutate(Employed = Employed/TotalPop) %>%
+  mutate(Citizen = Citizen/TotalPop)
+# Minority attribute by combining {Hispanic, Black, Native, Asian, Pacific} in census.del
+census.del = census.del %>% mutate(Minority = Hispanic+Black+Native+Asian+Pacific)
+# remove {Walk, PublicWork, Construction,Hispanic, Black, Native, Asian, Pacific} in census.del
+census.del = census.del %>% select(-c(Walk, PublicWork, Construction,Hispanic, Black, Native, Asian, Pacific))
+
+# Sub-county census data census.subct
+census.subct = census.del %>% group_by(State, County) %>% add_tally() %>% 
+  mutate(CountyTotal = n) %>%
+  mutate(weight = TotalPop/CountyTotal) %>%
+  select(-n)
+head(census.subct)
+
+# County census data, census.ct 
+census.ct = census.subct %>% summarize_at()
+head(census.ct)
+```
+
+

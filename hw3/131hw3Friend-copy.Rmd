@@ -1,0 +1,158 @@
+---
+title: "131 HW3"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ROCR)
+library(tree)
+library(maptree)
+library(class)
+library(lattice)
+library(ggridges)
+library(superheat)
+```
+
+```{r}
+drug_use <- read_csv('drug.csv',
+col_names = c('ID','Age','Gender','Education','Country','Ethnicity', 'Nscore','Escore','Oscore','Ascore','Cscore','Impulsive', 'SS','Alcohol','Amphet','Amyl','Benzos','Caff','Cannabis','Choc','Coke','Crack','Ecstasy','Heroin','Ketamine', 'Legalh','LSD','Meth','Mushrooms','Nicotine','Semer','VSA'))
+drug_use <- drug_use %>% mutate_at(as.ordered, .vars=vars(Alcohol:VSA))
+drug_use <- drug_use %>%
+mutate(Gender = factor(Gender, labels=c("Male", "Female"))) %>%
+mutate(Ethnicity = factor(Ethnicity, labels=c("Black", "Asian", "White",
+"Mixed:White/Black", "Other",
+"Mixed:White/Asian",
+"Mixed:Black/Asian"))) %>%
+mutate(Country = factor(Country, labels=c("Australia", "Canada", "New Zealand",
+"Other", "Ireland", "UK", "USA")))
+```
+
+1(a).Define a new factor response variable recent_cannabis_use which is “Yes” if a person has used cannabis
+within a year, and “No” otherwise. 
+```{r}
+drug_use <- drug_use %>% mutate(recent_cannabis_use = as.factor(ifelse(Cannabis < 'CL3', 'No', 'Yes')))
+str(drug_use)
+```
+1(b)Split drug_use_subset into a training data set and a test data set called drug_use_train and drug_use_test.
+The training data should include 1500 randomly sampled observation and the test data should include the
+remaining observations in drug_use_subset.
+```{r}
+set.seed(1)
+drug_use_subset <- drug_use %>% select(Age:SS, recent_cannabis_use)
+train <- sample(1:nrow(drug_use_subset),1500)
+drug_use_train <- drug_use_subset[train,]
+drug_use_test <- drug_use_subset[-train,]
+dim(drug_use_train)
+dim(drug_use_test)
+```
+1(c) Fit a logistic regression to model recent_cannabis_use as a function of all other predictors in
+drug_use_train. Fit this regression using the training data only.
+```{r}
+log_mod <- glm(recent_cannabis_use~. , data = drug_use_train , family = binomial)
+summary(log_mod)
+```
+2.Decision Tree Model
+```{r}
+#a
+set.seed(1)
+tree_parameters <- tree.control(nobs=nrow(drug_use_train), minsize=10, mindev=1e-3)
+tree_mod <- tree(recent_cannabis_use ~ . , control = tree_parameters, data = drug_use_train)
+cvtree <- cv.tree(tree_mod, K = 10, FUN = prune.misclass)
+best_size <- min(cvtree$size[which(cvtree$dev == min(cvtree$dev))])
+best_tree <- prune.tree(tree_mod, best = best_size)
+
+```
+By drawing the tree, we can see that the first split of our tree is by the `Country` variable.
+```{r}
+#b
+draw.tree(best_tree, nodeinfo = TRUE)
+```
+
+The TPR of our predictions is 0.7867299 and the FPR is 0.1666667.
+As the *true positive rate* (TPR) is calculated by $\frac{TP}{TP+FN}$, we divide the bottom right element by the second column of our confusion matrix. Likewise, the *false positive rate* (FPR) is calculated by $\frac{FP}{FP+TN}$ which can be obtained by dividing the lower left element by the first column of our confusion matrix.
+```{r}
+pred.val <- predict(best_tree, drug_use_test, type = 'class')
+pred.val1 <- predict(best_tree, drug_use_test, type = 'vector')
+err <- table(pred.val, drug_use_test$recent_cannabis_use)
+tpr <- err[2,2]/(err[2,2] + err[1,2])
+fpr <- err[2,1]/(err[2,1] + err[1,1])
+```
+
+3.ROC curve for decision tree
+```{r}
+pred <- prediction(pred.val1[,2],drug_use_test$recent_cannabis_use)
+perf <- performance(pred, measure = 'tpr',x.measure = 'fpr')
+plot(perf, col = 2, lwd = 3, main = 'ROC Curve for decision tree')
+abline(0,1)
+```
+ROC curve for logistic regression
+```{r}
+pred_log <- predict(log_mod, drug_use_test,type = 'response')
+pred2 <- prediction(pred_log, drug_use_test$recent_cannabis_use)
+perf2 <- performance(pred2, measure = 'tpr',x.measure = 'fpr')
+plot(perf2, col = 2 , lwd = 3 , main = 'ROC curve for logistic regression')
+abline(0,1)
+```
+3(b).Compute AUC for both models and print them. AUC for decision tree is 0.8348046 and AUC for logistic regression is 0.8792247. We can find AUC for logistic regression is larger.
+```{r}
+auc_tree <- performance(pred,'auc')@y.values
+auc_log <- performance(pred2,'auc')@y.values
+```
+4(a)Convert type column to factor. Use the table command to print the number of patients with each leukemia subtype. Which leukemia subtype occurs the least in this data?
+BCR-ABL occurs the least in this data.
+```{r}
+leukemia_data <- read_csv("leukemia_data.csv")
+leukemia_data <- leukemia_data %>% mutate(Type = as.factor(leukemia_data$Type))
+leukemia_data
+table(leukemia_data$Type)
+```
+Run PCA on the leukemia data using prcomp function with scale=TRUE and center=TRUE (this scales
+each gene to have mean 0 and variance 1).
+```{r}
+pr.out <- prcomp(leukemia_data %>% select(-Type), scale = TRUE, center = TRUE)
+pr.var <- pr.out$sdev ^ 2
+pve <- pr.var / sum(pr.var)
+cumulative_pve <- cumsum(pve)
+## This will put the next two plots side by side
+par(mfrow=c(1, 2))
+## Plot proportion of variance explained
+plot(pve, type="l", lwd=3)
+plot(cumulative_pve, type="l", lwd=3)
+```
+4c.Use the results of PCA to project the data into the first two principal component dimensions. prcomp
+returns this dimension reduced data in the first columns of x. Plot the data as a scatter plot using plot
+function with col=plot_colors where plot_colors is defined
+```{r}
+rainbow_colors <- rainbow(7)
+plot_colors <- rainbow_colors[leukemia_data$Type]
+new_coords <- pr.out$x[,1:2]
+plot(new_coords, xlim = c(-60,60), ylim = c(-60,40), cex = 0 , main = 'PC1 & PC2')
+text(-new_coords, label = leukemia_data$Type, cex = 0.3, col = plot_colors)
+abline(h = 0, v = 0, col = 'lightblue', lty = 3)
+```
+T-ALL is most clearly separated from the others along the PC1 axis.
+```{r}
+head(sort(abs(pr.out$rotation[,1]),decreasing = TRUE))
+```
+4f.
+```{r}
+library(dendextend)
+leukemia_subset <- leukemia_data %>% filter(Type == c('T-ALL', 'TEL-AML1', 'Hyperdip50'))
+dis <- dist(leukemia_subset[,-1], method = 'euclidean')
+leukemia.hc <- hclust(dis, method = 'complete')
+dend1 <- as.dendrogram(leukemia.hc)
+dend1 <- color_branches(dend1, k = 3)
+dend1 <- color_labels(dend1, k = 3)
+dend1 <- set(dend1, 'labels_cex', 0.3)
+dend1 <- set_labels(dend1, labels = leukemia_subset$Type[order.dendrogram(dend1)])
+plot(dend1, horiz = T, main = 'Dendrogram colored by three clusters')
+
+dend2 <- as.dendrogram(leukemia.hc)
+dend2 <- color_branches(dend2, k = 5)
+dend2 <- color_labels(dend2, k = 5)
+dend2 <- set(dend2, 'labels_cex', 0.3)
+dend2 <- set_labels(dend2, labels = leukemia_subset$Type[order.dendrogram(dend2)])
+plot(dend2, horiz = T, main = 'Dendrogram colored by five clusters')
+```
